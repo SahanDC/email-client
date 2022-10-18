@@ -1,0 +1,1060 @@
+// 190097J
+package assignment;
+
+import java.util.Scanner;
+import java.util.LinkedList;
+import java.io.Serializable;
+import java.util.Calendar;
+import java.util.ArrayList;
+import java.io.*;
+import java.util.Locale;
+import javax.mail.*;
+import javax.mail.internet.MimeMultipart;
+import javax.mail.search.FlagTerm;
+import java.io.IOException;
+import java.util.Properties;
+import java.util.*;
+import java.util.Date;
+import javax.mail.*;
+import javax.mail.Flags.Flag;
+import javax.mail.internet.InternetAddress;
+import javax.mail.internet.MimeMessage;
+
+public class EmailClient {
+    public static void main(String[] args) {
+        // instance of a new email client
+        EmailSystem emailClient = new EmailSystem();
+        Scanner scanner = new Scanner(System.in);
+        System.out.println("Enter option type: \n"
+                + "1 - Adding a new recipient\n"
+                + "2 - Sending an email\n"
+                + "3 - Printing out all the recipients who have birthdays\n"
+                + "4 - Printing out details of all the emails sent\n"
+                + "5 - Printing out the number of recipient objects in the application");
+        emailClient.serializeRetrievedEmail(new ReceiveEmail());
+        boolean isActive = true;
+        while (isActive){
+            int option = Integer.parseInt(scanner.nextLine().trim());
+            switch(option) {
+                case 1:
+                    System.out.println("Enter the Details of the Recipient below:");
+                    String recipientDetail = scanner.nextLine().trim();
+                    emailClient.addRecipient(recipientDetail);
+                    System.out.println("\nRecipient was added successfully!");
+                    break;
+                case 2:
+                    System.out.println("Enter the details of the receiver email to send (email, subject, content):");
+                    String email = scanner.nextLine().trim();
+                    emailClient.sendEmail(email);
+                    break;
+                case 3:
+                    System.out.println("Enter the date to display birthdays :");
+                    System.out.println("Input format - yyyy/mm/dd");
+                    String[] dateArray = scanner.nextLine().trim().split("/");
+                    Date date = new Date(dateArray[0], dateArray[1], dateArray[2]);
+                    emailClient.printBirthdayOnGivenDate(date);
+                    break;
+                case 4:
+                    System.out.println("Enter the date to display all sent emails:");
+                    System.out.println("Input format - yyyy/mm/dd");
+                    String[] dateParts = scanner.nextLine().trim().split("/");
+                    Date givenDate = new Date(dateParts[0], dateParts[1], dateParts[2]);
+                    emailClient.printEmailDetailOnGivenDate(givenDate);
+                    break;
+                case 5:
+                    System.out.println("Printing out the number of recipient objects in the application");
+                    emailClient.printNumberOfRecipients();
+                    break;
+                case -1:
+                    isActive = false;
+                    System.out.println("System stopped!");
+                    break;
+                default:
+                    System.out.println("Invalid Input!"+"\n");
+                    break;
+            }
+        }
+        emailClient.closeThread();
+        emailClient.sendWishes();
+        emailClient.serializeEmail();
+        // emailClient.serializeReceivedEmail();
+        scanner.close();
+
+        System.out.println("Have a nice Day!");
+    }
+}
+
+// This class will create a new EmailClient
+class EmailSystem {
+    private ArrayList<Recipient> allRecipients;
+    private ArrayList<IGreet> greetRecipients;
+    private ArrayList<Email> previousEmail;
+    private ArrayList<Email> todayMail = new ArrayList<>();
+    private ArrayList<ReceivedMail> previousReceiveEmail = new ArrayList<>();
+    private ArrayList<ReceivedMail> todayReceivedMail = new ArrayList<>();
+    private ReceivedMail receivedMail;
+    private Save save;
+    private Receive receive;
+    private BlockingQueue queue;
+
+    public EmailSystem() {
+        // loading all previous emails and saved recipients
+        this.allRecipients = InOut.loadRecipients();
+        this.greetRecipients = loadGreetRecipients();
+        this.previousEmail = InOut.emails();
+        // this.previousReceiveEmail = InOut.receiveMails();
+        this.queue = new BlockingQueue(5);
+        this.receive = new Receive(queue, new EmailStatPrinter(), new EmailStatRecorder());
+        this.save = new Save(queue);
+        System.out.println("\nStarting Threads");
+        receive.start();
+        save.start();
+    }
+
+    // recipients who have a birthday saved
+    private ArrayList<IGreet> loadGreetRecipients(){
+        ArrayList<IGreet> greetArrayList = new ArrayList<>();
+        if (!this.allRecipients.isEmpty()) {
+            for (int i = 0; i < this.allRecipients.size(); i++) {
+                if (this.allRecipients.get(i) instanceof IGreet)
+                    greetArrayList.add((IGreet) this.allRecipients.get(i));
+            }
+        }
+        return greetArrayList;
+    }
+
+    // adds a user
+    public void addRecipient(String recipientDetails){
+        Recipient recipient = InOut.createRecipient(recipientDetails.split(":"));
+        InOut.saveRecipient(recipient);
+        this.allRecipients.add(recipient);
+        if (recipient instanceof IGreet)
+            this.greetRecipients.add((IGreet) recipient);
+    }
+
+    // send an email to a user given email
+    public void sendEmail(String emailDetails) {
+        String[] emailParts = emailDetails.trim().split(",");
+        Email sendingEmail = new Email(emailParts[0], emailParts[1], emailParts[2]);
+        System.out.println("\nSending your email...");
+        SendEmail.sendEmail(sendingEmail);
+        System.out.println("Your email was sent successfully");
+        this.todayMail.add(sendingEmail);
+    }
+
+    // prints received mails
+    public void receiveEmails(ReceiveEmail receiveEmail){
+        ArrayList<ReceivedMail> receivedMailArrayList = receiveEmail.createReceivedMail();
+        try {
+            if (receiveEmail.getCount() != 0) {
+                for (int i = 0; i < receiveEmail.getCount(); i++) {
+                    this.todayReceivedMail.add(receivedMailArrayList.get(i));
+                }
+            } else System.out.println("no emails received today!");
+        } catch (IndexOutOfBoundsException e){
+            System.out.println("No emails received after the last checking!");
+        }
+    }
+    // prints all recipients who have birthdays on a given date
+    public void printBirthdayOnGivenDate(Date date){
+        ArrayList<IGreet> birthdayRecipient;
+        birthdayRecipient = getBirthdayRecipients(this.greetRecipients, date);
+        if (birthdayRecipient.isEmpty())
+            System.out.println("\nNo birthdays on " + date.getYear() + "/" + date.getMonth() + "/" + date.getDay());
+        else{
+            System.out.println("\nBirthdays on " + date.getYear() + "/" + date.getMonth() + "/" + date.getDay());
+            for (int i = 0 ; i < birthdayRecipient.size(); i++)
+                System.out.println(birthdayRecipient.get(i).getName());
+        }
+    }
+
+    // return all recipients who have birthdays on a given date
+    private ArrayList<IGreet> getBirthdayRecipients(ArrayList<IGreet> allBirthdayRecipients, Date date){
+        ArrayList<IGreet> birthdayRecipients = new ArrayList<>();
+        if (allBirthdayRecipients.isEmpty()) return birthdayRecipients;
+        else {
+            for (int i = 0; i < allBirthdayRecipients.size(); i++){
+                if (allBirthdayRecipients.get(i).getBirthday().getDay().equals(date.getDay()) && allBirthdayRecipients.get(i).getBirthday().getMonth().equals(date.getMonth()))
+                    birthdayRecipients.add(allBirthdayRecipients.get(i));
+            }
+        }
+        return birthdayRecipients;
+    }
+    // print all mails sent on a given date
+    public void printEmailDetailOnGivenDate(Date date){
+        ArrayList<Email> emailsOnGivenDate = getEmailDetailOnGivenDate(this.previousEmail, date);
+        if (emailsOnGivenDate.isEmpty()) System.out.println("\nNo emails on " + date.getYear() + "/" + date.getMonth() + "/" + date.getDay());
+        else{
+            System.out.println("\nEmails on "+ date.getYear() + "/" + date.getMonth() + "/" + date.getDay() +"\n");
+            for (int i = 0; i < emailsOnGivenDate.size(); i++)
+                System.out.println("Receiver: " + emailsOnGivenDate.get(i).getRecipientEmail() + "\nSubject: " + emailsOnGivenDate.get(i).getSubject() + "\nContent: " + emailsOnGivenDate.get(i).getContent() + "\n");
+        }
+    }
+
+    // returns all mails sent on a given date
+    private ArrayList<Email> getEmailDetailOnGivenDate(ArrayList<Email> emails, Date date){
+        ArrayList<Email> emailsOnGivenDate = new ArrayList<>();
+        if (emails.isEmpty()) {}
+        else {
+            for (int i = 0 ; i < emails.size(); i++){
+                if (emails.get(i).getSentDate().getYear().equals(date.getYear()) && emails.get(i).getSentDate().getMonth().equals(date.getMonth()) && emails.get(i).getSentDate().getDay().equals(date.getDay()))
+                    emailsOnGivenDate.add(emails.get(i));
+            }
+        }
+        return emailsOnGivenDate;
+    }
+
+    // print the number of recipients in email client
+    public void printNumberOfRecipients() {
+        System.out.println("\nNumber of recipients = " + this.allRecipients.size());
+    }
+
+    // send wishes for everyone who has birthdays today. This runs every time EmailClient Runs
+    public void sendWishes() {
+        System.out.println("Checking for birthdays...");
+        Date today = new Date();
+        ArrayList<IGreet> todayBirthdayRecipients;
+        todayBirthdayRecipients = getBirthdayRecipients(this.greetRecipients, today);
+        if (todayBirthdayRecipients.isEmpty()) System.out.println("No Birthdays today!");
+        else {
+            for (int i = 0; i < todayBirthdayRecipients.size(); i++){
+                if (todayBirthdayRecipients.get(i) instanceof Personal){
+                    sendPersonal((Personal) todayBirthdayRecipients.get(i));
+                } else if (todayBirthdayRecipients.get(i) instanceof OfficeFriend){
+                    sendOfficial((OfficeFriend) todayBirthdayRecipients.get(i));
+                }
+            }
+        }
+    }
+
+    // send wishes to a personal friend
+    private void sendPersonal(Personal personal){
+        Email wishEmail = new Email(personal.getEmail(), "Birthday Wish!", "Dear " + personal.getNickName() + ", Wishing you a happy birthday!");
+        SendEmail.sendEmail(wishEmail);
+        this.todayMail.add(wishEmail);
+    }
+
+    private void sendOfficial(OfficeFriend friend){
+        Email wishEmail = new Email(friend.getEmail(), "Birthday!", "Happy Birthday " + friend.getName());
+        SendEmail.sendEmail(wishEmail);
+        this.todayMail.add(wishEmail);
+    }
+
+    // serialize all email Objects
+    public void serializeEmail(){
+        ArrayList<Email> emailArrayList = new ArrayList<>();
+        emailArrayList.addAll(this.previousEmail);
+        emailArrayList.addAll(this.todayMail);
+        InOut.saveEmails(emailArrayList);
+        System.out.println("\nSaved to Disk!");
+    }
+
+    // serialize all received email objects
+    public void serializeReceivedEmail(){
+        ArrayList<ReceivedMail> receivedMailArrayList = new ArrayList<>();
+        receivedMailArrayList.addAll(this.previousReceiveEmail);
+        receivedMailArrayList.addAll(this.todayReceivedMail);
+        InOut.saveReceivedEmails(receivedMailArrayList);
+        System.out.println("\nReceived emails saved to hard drive!");
+    }
+
+    // serialize all received email objects
+    public void serializeRetrievedEmail(ReceiveEmail receiveEmail){
+        ArrayList<ReceivedMail> receivedMailArrayList = receiveEmail.createReceivedMail();
+        try {
+            if (receiveEmail.getCount() != 0) {
+                for (int i = 0; i < receiveEmail.getCount(); i++) {
+                    this.receivedMail = new ReceivedMail(receivedMailArrayList.get(i).getSenderEmail(), receivedMailArrayList.get(i).getSubject(), receivedMailArrayList.get(i).getContent()
+                                                            , receivedMailArrayList.get(i).getReceivedDate());
+                    InOut.saveRetrievedEmails(this.receivedMail);
+                }
+            } else System.out.println("no emails received today!");
+        } catch (IndexOutOfBoundsException e){
+            System.out.println("No emails received after the last checking!");
+        } finally {
+            System.out.println("Received emails saved to hard drive!");
+        }
+
+
+    }
+
+    // Closing threads
+    public void closeThread(){
+        System.out.println("Closing threads...");
+        this.receive.stopThread();
+        try {
+            this.save.join();
+        } catch (InterruptedException e) {
+            System.out.println("interrupted!");
+        }
+        System.out.println("Thread closed!");
+    }
+}
+
+class InOut {
+    // saves a recipient detail string to the text file
+    public static void saveDetailToFile(String recipientDetail){
+        PrintWriter outStream = null;
+        try {
+            outStream = new PrintWriter(new FileWriter("clientList.txt", true));    // client detail file name in this file
+            outStream.println(recipientDetail);
+        } catch (IOException e){
+            System.out.println("Error occurred!");
+        } finally {
+            if (outStream != null)
+                outStream.close();
+        }
+    }
+
+    // saves notifications to the text file
+    public static void saveNotificationToFile(String notification){
+        PrintWriter outStream = null;
+        try {
+            outStream = new PrintWriter(new FileWriter("notification.txt", true));  // notification file name in this file
+            outStream.println(notification);
+        } catch (IOException e){
+            System.out.println("Error Occurred!");
+        } finally {
+            if (outStream != null)
+                outStream.close();
+        }
+    }
+
+    // relevant string to be saved for a recipient
+    public static void saveRecipient(Recipient recipient){
+        String recipientDetail = "";
+
+        if (recipient instanceof Personal) {
+            Personal personal = (Personal) recipient;
+            String name, nickname, email, birthday;
+            name = personal.getName();
+            nickname = personal.getNickName();
+            email = personal.getEmail();
+            birthday = personal.getBirthday().getYear() + "/" + personal.getBirthday().getMonth()
+                    + "/" + personal.getBirthday().getDay();
+
+            recipientDetail = "Personal: " + name + "," + nickname + "," + email + "," + birthday;
+
+        } else if (recipient instanceof OfficeFriend) {
+            OfficeFriend officialRecipientFriend = (OfficeFriend) recipient;
+            String name, email, designation, birthday;
+            name = officialRecipientFriend.getName();
+            email = officialRecipientFriend.getEmail();
+            designation = officialRecipientFriend.getDesignation();
+            birthday = officialRecipientFriend.getBirthday().getYear() + "/"
+                    + officialRecipientFriend.getBirthday().getMonth() + "/"
+                    + officialRecipientFriend.getBirthday().getDay();
+
+            recipientDetail = "OfficeFriend: " + name + "," + email + "," + designation + "," + birthday;
+
+        } else if (recipient instanceof Official) {
+            Official officialRecipient = (Official) recipient;
+            String name, email, designation;
+            name = officialRecipient.getName();
+            email = officialRecipient.getEmail();
+            designation = officialRecipient.getDesignation();
+
+            recipientDetail = "Official: " + name + "," + email + "," + designation;
+
+        }
+
+        saveDetailToFile(recipientDetail);
+    }
+
+    // deserialize all email objects in the saved text file....if not found, then return an empty array list of mails
+    public static ArrayList<Email> emails(){
+        ArrayList<Object> objects = null;
+        FileInputStream fileInputStream;
+        ObjectInputStream objectInputStream;
+        try {
+            fileInputStream = new FileInputStream("sent.txt");   // object file name in this file
+            objectInputStream = new ObjectInputStream(fileInputStream);
+            objects = (ArrayList<Object>) objectInputStream.readObject();
+            if (fileInputStream != null)    fileInputStream.close();
+            if (objectInputStream != null)  objectInputStream.close();
+        } catch (IOException e){
+            System.out.println("Could not load previous Emails!");  // if the file is not available
+        } catch (ClassNotFoundException e){
+            objects = new ArrayList<>();
+        }
+        if (objects == null)    return new ArrayList<>();
+        // System.out.println("Previous sent emails loaded!");
+        return (ArrayList<Email>) (ArrayList<?>) objects;
+    }
+
+    // deserialize all received email objects in the saved file.....if not found, then return an empty array list of received emails
+    public static ArrayList<ReceivedMail> receiveMails(){
+        ArrayList<Object> objects = null;
+        FileInputStream fileInputStream;
+        ObjectInputStream objectInputStream;
+        try {
+            fileInputStream = new FileInputStream("received.txt");
+            objectInputStream = new ObjectInputStream(fileInputStream);
+            objects = (ArrayList<Object>) objectInputStream.readObject();
+            if (fileInputStream != null)    fileInputStream.close();
+            if (objectInputStream != null)  objectInputStream.close();
+        } catch (IOException e){
+            System.out.println("Could not load previous received email!");
+        } catch (ClassNotFoundException e){
+            objects = new ArrayList<>();
+        }
+        if (objects == null)    return new ArrayList<ReceivedMail>();
+        System.out.println("Previous received emails loaded!");
+        return (ArrayList<ReceivedMail>) (ArrayList<?>) objects;
+    }
+    // serialize mails in the file
+    public static void saveEmails(ArrayList<Email> emailArrayList){
+        FileOutputStream fileOutputStream;
+        ObjectOutputStream objectOutputStream;
+        try {
+            fileOutputStream = new FileOutputStream("sent.txt",true);
+            objectOutputStream = new ObjectOutputStream(fileOutputStream);
+            objectOutputStream.writeObject(emailArrayList);
+            if (fileOutputStream != null)   fileOutputStream.close();
+            if (objectOutputStream != null) objectOutputStream.close();
+        } catch (IOException e){
+            System.out.println("error Occurred!");
+        }
+    }
+
+    // serialize retrieved mails in the file
+    public static void saveReceivedEmails(ArrayList<ReceivedMail> receivedMailArrayList){
+        FileOutputStream fileOutputStream;
+        ObjectOutputStream objectOutputStream;
+        try{
+            fileOutputStream = new FileOutputStream("received.txt");
+            objectOutputStream = new ObjectOutputStream(fileOutputStream);
+            objectOutputStream.writeObject(receivedMailArrayList);
+            if (fileOutputStream != null)   fileOutputStream.close();
+            if (objectOutputStream != null) objectOutputStream.close();
+        } catch (IOException e){
+            System.out.println("eRrOr OcCuRrEd!");
+        }
+    }
+
+    // serialize received email objects in to hard drive
+    public static void saveRetrievedEmails(ReceivedMail receivedMail){
+        try{
+            ObjectOutputStream objectOutputStream = new ObjectOutputStream(new FileOutputStream("received.txt", true)){
+                protected void writeStream(){
+                    try {
+                        reset();
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                }
+            };
+            objectOutputStream.writeObject(receivedMail);
+            objectOutputStream.close();
+        } catch (IOException e){
+            System.out.println("ERROR OCCURRED!");
+        }
+    }
+    // read and returns all the recipient objects given in the string lines from the file
+    public static ArrayList<Recipient> loadRecipients(){
+        ArrayList<Recipient> recipients = new ArrayList<>();
+        ArrayList<String> recipientDetail = readFromFile();
+
+        if (recipientDetail.isEmpty()){ return recipients;
+        } else {
+            // System.out.println("Recipient detail loaded!");
+            String[] detailParts;
+            Recipient recipient;
+            for (int i = 0; i < recipientDetail.size(); i++){
+                detailParts = recipientDetail.get(i).split(":");
+                recipient = createRecipient(detailParts);   // creating recipient according to the type
+                if (recipient != null) {
+                    recipients.add(recipient);
+                } else {
+                    continue;
+                }
+            }
+        }
+        return recipients;
+    }
+
+    // reads all recipient details from the file
+    public static ArrayList<String> readFromFile() {
+        ArrayList<String> recipientDetails = new ArrayList<>();
+        FileReader fileIn;
+        BufferedReader in;
+        try {
+            fileIn = new FileReader("clientList.txt");
+            in = new BufferedReader(fileIn);
+            String line;
+            while ((line = in.readLine()) != null) {
+                recipientDetails.add(line);
+
+            }
+            in.close();
+            fileIn.close();
+
+        } catch (Exception e) {
+            System.out.println("Could not load Recipient Details");
+        }
+
+        return recipientDetails;
+
+    }
+
+    // returns relevant recipient object
+    public static Recipient createRecipient(String[] detailParts){
+        String[] detailArray;
+        String[] birthdayArray;
+        Date birthday;
+        switch (detailParts[0].trim().toLowerCase(Locale.ROOT)){
+            case "official":
+                detailArray = detailParts[1].trim().split(",");
+                return new Official(detailArray[0], detailArray[1], detailArray[2]);
+            case "officefriend":
+                detailArray = detailParts[1].trim().split(",");
+                birthdayArray = detailArray[3].split("/");
+                birthday = new Date(birthdayArray[0], birthdayArray[1], birthdayArray[2]);
+                return new OfficeFriend(detailArray[0], detailArray[1], detailArray[2], birthday);
+            case "personal":
+                detailArray = detailParts[1].trim().split(",");
+                birthdayArray = detailArray[3].split("/");
+                birthday = new Date(birthdayArray[0], birthdayArray[1], birthdayArray[2]);
+                return new Personal(detailArray[0], detailArray[1], detailArray[2], birthday);
+            default:
+                return null;
+        }
+    }
+}
+
+abstract class Recipient {
+    private String name;
+    private String email;
+
+    public Recipient(String name, String email) {
+        this.name = name;
+        this.email = email;
+    }
+
+    public String getEmail() {
+        return email;
+    }
+
+    public String getName() {
+        return name;
+    }
+}
+
+class Official extends Recipient{
+    private String designation;
+
+    public Official(String name, String email, String designation) {
+        super(name, email);
+        this.designation = designation;
+    }
+
+    public String getDesignation() {
+        return designation;
+    }
+}
+
+class OfficeFriend extends Official implements IGreet{
+    private Date birthday = new Date();
+
+    public OfficeFriend(String name, String email, String designation, Date birthday) {
+        super(name, email, designation);
+        this.birthday = birthday;
+    }
+
+    public Date getBirthday() {
+        return birthday;
+    }
+}
+
+class Personal extends Recipient implements IGreet{
+    private String nickName;
+    private Date birthday = new Date();
+
+    public Personal(String name, String nickName, String email, Date birthday) {
+        super(name, email);
+        this.nickName = nickName;
+        this.birthday = birthday;
+    }
+
+    public String getNickName() {
+        return nickName;
+    }
+
+    public Date getBirthday() {
+        return birthday;
+    }
+}
+
+interface IGreet {
+    Date getBirthday();
+    String getName();
+}
+
+class SendEmail {
+
+    public static void sendEmail(Email email) {
+        final String username = "sahantestmail@gmail.com";
+        final String password = "Sahantest333";
+
+        Properties prop = new Properties();
+        prop.put("mail.smtp.host", "smtp.gmail.com");
+        prop.put("mail.smtp.port", "587");
+        prop.put("mail.smtp.auth", "true");
+        prop.put("mail.smtp.starttls.enable", "true");
+
+        Session session = Session.getInstance(prop, new javax.mail.Authenticator() {
+            protected PasswordAuthentication getPasswordAuthentication() {
+                return new PasswordAuthentication(username, password);
+            }
+        });
+
+        try {
+
+            Message message = new MimeMessage(session);
+            message.setFrom(new InternetAddress(username));
+            message.setRecipients(Message.RecipientType.TO, InternetAddress.parse(email.getRecipientEmail()));
+            message.setSubject(email.getSubject());
+            message.setText(email.getContent());
+            Transport.send(message);
+        } catch (MessagingException e) {
+            e.printStackTrace();
+        }
+    }
+}
+
+class ReceiveEmail {
+    private ArrayList<ReceivedMail> receivedMailArrayList = new ArrayList<>();
+    private ArrayList<String> senders = new ArrayList<>();
+    private ArrayList<String> subjects = new ArrayList<>();
+    private ArrayList<String> contents  = new ArrayList<>();
+    private ArrayList<String> dateArrayList = new ArrayList<>();
+    private ReceivedMail receivedMail;
+    private int count = 0;
+    Folder inbox;
+    //Constructor of the class.
+    public ReceiveEmail()
+    {
+        /*  Set the mail properties  */
+        Properties props = System.getProperties();
+        props.setProperty("mail.store.protocol", "imaps");
+        try
+        {
+            /*  Create the session and get the store for read the mail. */
+            Session session = Session.getDefaultInstance(props, null);
+            Store store = session.getStore("imaps");
+            store.connect("imap.gmail.com","sahantestmail@gmail.com", "Sahantest333");
+
+            /*  Mention the folder name which you want to read. */
+            inbox = store.getFolder("Inbox");
+            System.out.println("No of Unread Messages : " + inbox.getUnreadMessageCount());
+
+            /*Open the inbox using store.*/
+            inbox.open(Folder.READ_ONLY);
+
+            /*  Get the messages which is unread in the Inbox*/
+            Message messages[] = inbox.search(new FlagTerm(new Flags(Flag.SEEN), false));
+
+            /* Use a suitable FetchProfile    */
+            FetchProfile fp = new FetchProfile();
+            fp.add(FetchProfile.Item.ENVELOPE);
+            fp.add(FetchProfile.Item.CONTENT_INFO);
+            inbox.fetch(messages, fp);
+
+
+            try
+            {
+                printAllMessages(messages);
+                inbox.close(true);
+                store.close();
+            }
+            catch (Exception ex)
+            {
+                System.out.println("Exception arise at the time of read mail");
+                ex.printStackTrace();
+            }
+        }
+        catch (NoSuchProviderException e)
+        {
+            e.printStackTrace();
+            System.exit(1);
+        }
+        catch (MessagingException e)
+        {
+            e.printStackTrace();
+            System.exit(2);
+        }
+        count++;
+    }
+
+
+    public void printAllMessages(Message[] messages) throws Exception
+    {
+        for (int i = 0; i < messages.length; i++)
+        {
+            /*System.out.println("MESSAGE #" + (i + 1) + ":");*/
+            printEnvelope(messages[i]);
+        }
+    }
+
+    /*  Print the envelope(FromAddress,ReceivedDate,Subject)  */
+    public void printEnvelope(Message message) throws Exception
+    {
+        Address[] a;
+        // FROM
+        if ((a = message.getFrom()) != null)
+        {
+            for (int j = 0; j < a.length; j++)
+            {
+                /*System.out.println("FROM: " + a[j].toString());*/
+                // senders.add(a[j].toString());   // adding the sender email for the senders array
+            }
+        }
+        senders.add(a[0].toString());   // adding the sender email for the senders array
+        // senderEmails.add(senders);
+        // TO
+        if ((a = message.getRecipients(Message.RecipientType.TO)) != null)
+        {
+            for (int j = 0; j < a.length; j++)
+            {
+                /*System.out.println("TO: " + a[j].toString());*/
+            }
+        }
+        String subject = message.getSubject();
+        Date receivedDate = message.getReceivedDate();
+        String content = message.getContent().toString();
+        /*System.out.println("Subject : " + subject);*/
+        subjects.add(subject);  // adding the subject to the subjects array
+
+        /*System.out.println("Received Date : " + receivedDate.toString());*/
+        dateArrayList.add(receivedDate.toString()); // adding the received date to the array
+
+        /*System.out.println("Content : " + content);*/
+        contents.add(content);
+        // getContent(message);
+
+
+    }
+
+    public void getContent(Message msg)
+    {
+        try
+        {
+            String contentType = msg.getContentType();
+            // System.out.println("Content Type : " + contentType);
+            Multipart mp = (Multipart) msg.getContent();
+            int count = mp.getCount();
+            for (int i = 0; i < count; i++)
+            {
+                dumpPart(mp.getBodyPart(i));
+            }
+        }
+        catch (Exception ex)
+        {
+            System.out.println("Exception arise at get Content");
+            ex.printStackTrace();
+        }
+    }
+
+    public void dumpPart(Part p) throws Exception
+    {
+        // Dump input stream ..
+        InputStream is = p.getInputStream();
+        // If "is" is not already buffered, wrap a BufferedInputStream
+        // around it.
+        if (!(is instanceof BufferedInputStream))
+        {
+            is = new BufferedInputStream(is);
+        }
+        int c;
+        System.out.println("Message : ");
+        while ((c = is.read()) != -1)
+        {
+            System.out.write(c);
+        }
+    }
+
+    public ArrayList<ReceivedMail> createReceivedMail(){
+        for (int i = 0; i < senders.size(); i++){
+            this.receivedMail = new ReceivedMail(senders.get(i), subjects.get(i), contents.get(i), dateArrayList.get(i));
+            this.receivedMailArrayList.add(receivedMail);
+        }
+        return receivedMailArrayList;
+    }
+
+    public int getCount() {
+        return count;
+    }
+}
+
+class Date implements Serializable {
+    private String year, month, day;
+
+    // This creates a given date
+    public Date(String year, String month, String day) {
+        this.year = year;
+        this.month = month;
+        this.day = day;
+    }
+
+    // This creates today's date
+    public Date(){
+        Calendar calendar = Calendar.getInstance();
+        this.year = String.valueOf(calendar.get(Calendar.YEAR));
+        this.month = String.format("%02d", (calendar.get(Calendar.MONTH) + 1));
+        this.day = String.format("%02d", (calendar.get(Calendar.DATE)));
+    }
+
+    public String getYear() {
+        return year;
+    }
+
+    public String getMonth() {
+        return month;
+    }
+
+    public String getDay() {
+        return day;
+    }
+}
+
+class Email implements Serializable {
+    private String recipientEmail, subject, content;
+    private Date sentDate;
+
+    public Email(String recipientEmail, String subject, String content) {
+        this.recipientEmail = recipientEmail;
+        this.subject = subject;
+        this.content = content;
+        this.sentDate = new Date();
+    }
+
+    public String getRecipientEmail() {
+        return recipientEmail;
+    }
+
+    public String getSubject() {
+        return subject;
+    }
+
+    public String getContent() {
+        return content;
+    }
+
+    public Date getSentDate() {
+        return sentDate;
+    }
+}
+
+class ReceivedMail implements Serializable {
+    private String senderEmail, subject, content, receivedDate;
+
+    public ReceivedMail(String senderEmail, String subject, String content, String receivedDate) {
+        this.senderEmail = senderEmail;
+        this.subject = subject;
+        this.content = content;
+        this.receivedDate = receivedDate;
+    }
+
+    public String getSenderEmail() {
+        return senderEmail;
+    }
+
+    public String getSubject() {
+        return subject;
+    }
+
+    public String getContent() {
+        return content;
+    }
+
+    public String getReceivedDate() {
+        return receivedDate;
+    }
+}
+
+class BlockingQueue {
+    private LinkedList<Email> linkedList;
+    private final int max;
+
+    public BlockingQueue(int max) {
+        this.max = max;
+        linkedList = new LinkedList<Email>();
+    }
+
+    public synchronized void enqueue(Email email){
+        while (linkedList.size() == max) {
+            try {
+                wait();
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+        linkedList.add(email);
+        notifyAll();
+        return;
+    }
+
+    public synchronized Email dequeue() {
+        while (linkedList.isEmpty()) {
+            try {
+                wait();
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+        Email email = linkedList.remove();
+        notifyAll();
+        return email;
+    }
+}
+
+class Receive extends Thread{
+    private BlockingQueue blockingQueue;
+    private static final String username = "sahantestmail@gmail.com";
+    private static final String password = "Sahantest333";
+    private Properties properties;
+    private volatile boolean isRunning;
+    private Observable[] observers;
+
+    public Receive(BlockingQueue blockingQueue, Observable observers1, Observable observers2){
+        this.blockingQueue = blockingQueue;
+        this.observers = new Observable[2];
+        this.observers[0] = observers1;
+        this.observers[1] = observers2;
+        this.properties = new Properties();
+
+        properties.put("mail.store.protocol", "imaps");
+        properties.put("mail.imaps.host", "imap.gmail.com");
+        properties.put("mail.imaps.port", "993");
+        this.isRunning = true;
+    }
+
+    @Override
+    public void run() {
+        while (isRunning){
+            try {
+                Session session = Session.getDefaultInstance(properties, null);
+                Store store = session.getStore("imaps");
+
+                // System.out.println("Connection initiated...");
+                store.connect(username, password);
+                // System.out.println("Connection is ready: ");
+
+                Folder inbox = store.getFolder("inbox");
+                inbox.open(Folder.READ_WRITE);
+
+                if (inbox.getUnreadMessageCount() > 0) {
+                    int messageCount = inbox.getUnreadMessageCount();
+
+                    //notify the observers
+                    observers[0].update(messageCount);
+                    observers[1].update(messageCount);
+                    System.out.println("Total messages in Inbox: " + messageCount);
+                    Message[] messages = inbox.search(new FlagTerm(new Flags(Flags.Flag.SEEN), false));
+
+                    int temp = 0;
+                    while (temp < messageCount){
+                        Message message = messages[temp];
+                        Email email = new Email(message.getFrom()[0].toString(), message.getSubject(), getTextFromMessage(message));
+                        blockingQueue.enqueue(email);
+                        message.setFlags(new Flags(Flags.Flag.SEEN), true);
+                        temp++;
+                    }
+                } else {
+                    // System.out.println("No new messages!");
+                }
+                inbox.close();
+                store.close();
+            } catch (MessagingException e){
+                System.out.println("Error");
+            }
+        }
+        // writing a different email to the queue to notify the save thread saying that this is the last email
+        Email lastEmail = new Email("-1", "-1", "-1");
+        blockingQueue.enqueue(lastEmail);
+        return;
+    }
+
+    public void stopThread(){
+        this.isRunning = false;
+    }
+
+    private String getTextFromMessage(Message message){
+        String result = "";
+        try {
+            if (message.isMimeType("text/plain")){
+                result = message.getContent().toString();
+            } else if (message.isMimeType("multipart/")){
+                MimeMultipart mimeMultipart = (MimeMultipart) message.getContent();
+                result = getTextFromMimeMultipart(mimeMultipart);
+            }
+        } catch (MessagingException | IOException e){
+            System.out.println("Error!");
+        }
+        return result;
+    }
+
+    //recursive method to read multipart emails
+    private String getTextFromMimeMultipart(MimeMultipart mimeMultipart){
+        String result = "";
+        try {
+            int count = mimeMultipart.getCount();
+            for (int i = 0; i < count; i++){
+                BodyPart bodyPart = mimeMultipart.getBodyPart(i);
+                if (bodyPart.isMimeType("text/plain")){
+                    result = result + "\n" + bodyPart.getContent();
+                    break;
+                } else if (bodyPart.getContent() instanceof MimeMultipart) {
+                    result = result + getTextFromMimeMultipart((MimeMultipart) bodyPart.getContent());
+                }
+            }
+        } catch (MessagingException | IOException e){
+            System.out.println("error");
+        }
+        return result;
+    }
+}
+
+class Save extends Thread{
+    private BlockingQueue blockingQueue;
+    private volatile boolean isRunning;
+
+    public Save(BlockingQueue blockingQueue) {
+        this.blockingQueue = blockingQueue;
+        this.isRunning = true;
+    }
+
+    @Override
+    public void run() {
+        while (isRunning){
+            Email email = blockingQueue.dequeue();
+
+            // check whether its the last email
+            if (email.getRecipientEmail().equals("-1")) return;
+        }
+        return;
+    }
+    public void stopThread(){
+        this.isRunning = false;
+    }
+}
+
+interface Observable {
+    void update(int number);
+}
+
+class EmailStatPrinter implements Observable {
+    @Override
+    public void update(int number) {
+        System.out.println("Notification: " + number + " emails received at " + Calendar.getInstance().getTime().toString());
+    }
+}
+
+class EmailStatRecorder implements Observable {
+
+    @Override
+    public void update(int number) {
+        String notification = "Notification: " + number + " emails received at " + Calendar.getInstance().getTime().toString();
+        InOut.saveNotificationToFile(notification);
+    }
+}

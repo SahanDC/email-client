@@ -1,0 +1,6 @@
+Added ReceiveEmail class
+Added ReceiveMail class
+Line 117 - 132 in InOut class
+Line 101 - 121 in InOut class
+Line 13 and 14 in EmailSystem class
+Line 158 - 165 in 165 in EmailSystem class
