@@ -8,7 +8,7 @@ public class SendMailTLS {
     public static void main(String[] args) {
 
         final String username = "sahantestmail@gmail.com";
-        final String password = "Sahantest333";
+        final String password = "*****";
 
         Properties prop = new Properties();
         prop.put("mail.smtp.host", "smtp.gmail.com");
