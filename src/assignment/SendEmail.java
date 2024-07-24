@@ -10,7 +10,7 @@ public class SendEmail {
 
     public static void sendEmail(Email email) {
         final String username = "sahantestmail@gmail.com";
-        final String password = "Sahantest333";
+        final String password = "*************";
 
         Properties prop = new Properties();
         prop.put("mail.smtp.host", "smtp.gmail.com");
